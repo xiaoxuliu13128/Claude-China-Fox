@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fox 控制台</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --fg:#e6e9ef; --dim:#8b93a3; --acc:#ff7a45; --ok:#3fb950; --warn:#d29922; --err:#f85149;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--fg);
+    font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    padding:24px; max-width:1100px; margin:0 auto;
+  }
+  h1{font-size:20px;font-weight:600;margin-bottom:4px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:24px}
+  .bar{display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
+  button{
+    background:var(--panel2); color:var(--fg); border:1px solid var(--line);
+    padding:7px 14px; border-radius:6px; cursor:pointer; font-size:13px;
+    transition:.15s;
+  }
+  button:hover{background:#262b36;border-color:#3a4150}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#111;font-weight:600}
+  button.primary:hover{background:#ff8f61}
+  button.danger{color:var(--err);border-color:#4a2528}
+  button.danger:hover{background:#2a1a1c}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:16px 18px; margin-bottom:12px;
+  }
+  .card.off{opacity:.55}
+  .row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+  .name{font-size:15px;font-weight:600}
+  .vendor{color:var(--dim);font-size:12px;margin-left:8px;font-weight:400}
+  .meta{color:var(--dim);font-size:12px;margin-top:6px;font-family:ui-monospace,Consolas,monospace}
+  .pill{
+    display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;
+    border:1px solid var(--line);margin-right:6px;margin-top:6px;
+  }
+  .pill.ok{color:var(--ok);border-color:#1f4429;background:#122016}
+  .pill.no{color:var(--dim)}
+  .pill.warn{color:var(--warn);border-color:#4a3a12;background:#211a0c}
+  .actions{display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+  .log{
+    background:#0a0c10;border:1px solid var(--line);border-radius:8px;
+    padding:12px;font-family:ui-monospace,Consolas,monospace;font-size:12px;
+    max-height:220px;overflow:auto;white-space:pre-wrap;color:var(--dim);
+  }
+  .log .ok{color:var(--ok)}
+  .log .err{color:var(--err)}
+  input,select{
+    background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    padding:8px 10px;border-radius:6px;font-size:13px;width:100%;
+    font-family:inherit;
+  }
+  input:focus,select:focus{outline:none;border-color:var(--acc)}
+  .field{margin-bottom:12px}
+  .field label{display:block;font-size:12px;color:var(--dim);margin-bottom:6px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .sec-title{font-size:13px;color:var(--dim);margin:24px 0 12px;letter-spacing:.5px}
+</style>
+</head>
+<body>
+
+<h1>Fox 控制台</h1>
+<div class="sub">AI 客户端本地化 · 检测 / 配置 / 注入</div>
+
+<div class="bar">
+  <button onclick="detect()">重新检测</button>
+  <button onclick="proxyStart()">启动代理</button>
+  <button onclick="proxyStop()" class="danger">停止代理</button>
+  <span id="proxyState" class="pill no">代理状态未知</span>
+</div>
+
+<div id="list"></div>
+
+<div class="sec-title">Claude 配置</div>
+<div class="card">
+  <div class="grid2">
+    <div class="field">
+      <label>供应商</label>
+      <select id="provider">
+        <option value="deepseek">DeepSeek</option>
+        <option value="glm">智谱 GLM</option>
+        <option value="kimi">Kimi</option>
+        <option value="anthropic">Anthropic 官方</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>API Key</label>
+      <input id="key" type="password" placeholder="sk-...">
+    </div>
+  </div>
+  <div class="actions" style="justify-content:flex-start">
+    <button class="primary" onclick="setKey()">写入 Key</button>
+    <button onclick="armor(true)">启用破甲</button>
+    <button onclick="armor(false)" class="danger">停用破甲</button>
+  </div>
+</div>
+
+<div class="sec-title">人格</div>
+<div class="card">
+  <div class="field">
+    <label>当前人格文件</label>
+    <select id="persona"></select>
+  </div>
+  <div class="actions" style="justify-content:flex-start">
+    <button onclick="applyPersona()">应用（热重载）</button>
+    <button onclick="loadPersonas()">刷新列表</button>
+  </div>
+</div>
+
+<div class="sec-title">日志</div>
+<div class="log" id="log">就绪。</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function log(msg, cls){
+  const el = $('log');
+  const t = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `[${t}] ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function api(path, method='GET', body){
+  const opt = { method, headers:{} };
+  if (body) { opt.headers['content-type']='application/json'; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(()=>({error:'响应不是 JSON'}));
+  if (!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+  return j;
+}
+
+// ── 检测 ───────────────────────────────────────────
+async function detect(){
+  log('检测中...');
+  try{
+    const list = await api('/api/detect');
+    const box = $('list');
+    box.innerHTML = '';
+    let n = 0;
+    for (const c of list){
+      const div = document.createElement('div');
+      div.className = 'card' + (c.installed ? '' : ' off');
+      if (c.installed) n++;
+
+      const state = c.state || {};
+      const pills = [];
+      pills.push(c.installed
+        ? `<span class="pill ok">已安装</span>`
+        : `<span class="pill no">未安装</span>`);
+      if (c.installed) {
+        pills.push(`<span class="pill ${state.configured?'ok':'warn'}">${state.configured?'已配置':'未配置'}</span>`);
+        if (c.inject.length) pills.push(`<span class="pill">${c.inject.join(' → ')}</span>`);
+        else pills.push(`<span class="pill warn">无注入方式</span>`);
+      }
+
+      div.innerHTML = `
+        <div class="row">
+          <div style="min-width:0">
+            <div class="name">${c.name}<span class="vendor">${c.vendor}</span></div>
+            <div>${pills.join('')}</div>
+            ${c.installed ? `
+              <div class="meta">${c.path}</div>
+              ${c.version ? `<div class="meta">版本 ${c.version}</div>` : ''}
+              ${c.asar ? `<div class="meta">asar ${c.asar.sizeMB} MB</div>` : ''}
+              ${c.notes ? `<div class="meta" style="color:#6b7280">${c.notes}</div>` : ''}
+            ` : ''}
+          </div>
+          <div class="actions" data-id="${c.id}"></div>
+        </div>`;
+      box.appendChild(div);
+
+      // 按客户端给按钮
+      const act = div.querySelector('.actions');
+      if (c.installed && c.id === 'claude') {
+        act.innerHTML = `
+          <button onclick="armor(true)">破甲</button>
+          <button class="danger" onclick="armor(false)">还原</button>`;
+      } else if (c.installed && c.id === 'dsh') {
+        act.innerHTML = `<button disabled title="需要 cordis 插件，尚未实现">插件注入</button>`;
+      } else if (c.installed) {
+        act.innerHTML = `<button disabled title="注入方式待实现">待实现</button>`;
+      }
+    }
+    log(`检测完成：${n} / ${list.length} 个客户端已安装`, 'ok');
+  } catch(e){
+    log('检测失败：' + e.message, 'err');
+  }
+}
+
+// ── 代理 ───────────────────────────────────────────
+async function refreshProxy(){
+  try{
+    const s = await api('/api/proxy/status');
+    const el = $('proxyState');
+    el.className = 'pill ' + (s.running ? 'ok' : 'no');
+    el.textContent = s.running ? `代理运行中 :${s.port}` : '代理未运行';
+  }catch(e){ log('查代理状态失败: '+e.message, 'err'); }
+}
+async function proxyStart(){
+  try{ const r = await api('/api/proxy/start','POST',{}); log('代理已启动 端口 '+r.port, 'ok'); refreshProxy(); }
+  catch(e){ log('启动失败：'+e.message, 'err'); }
+}
+async function proxyStop(){
+  try{ await api('/api/proxy/stop','POST',{}); log('代理已停止', 'ok'); refreshProxy(); }
+  catch(e){ log('停止失败：'+e.message, 'err'); }
+}
+
+// ── Claude ─────────────────────────────────────────
+async function setKey(){
+  const provider = $('provider').value;
+  const key = $('key').value.trim();
+  if (!key) return log('先填 Key', 'err');
+  try{
+    const r = await api('/api/claude/key','POST',{provider,key});
+    log(`Key 已写入  供应商=${provider}  端点=${r.url}`, 'ok');
+    log('重启 Claude Desktop 生效', 'ok');
+    detect();
+  }catch(e){ log('写入失败：'+e.message, 'err'); }
+}
+async function armor(on){
+  try{
+    const r = await api('/api/claude/armor','POST',{on});
+    log(on ? `破甲已启用，网关 → ${r.gateway}` : `破甲已停用，网关 → ${r.gateway}`, 'ok');
+    if (on) log('提示：先启动代理，否则客户端会连不上', 'warn');
+    detect();
+  }catch(e){ log('操作失败：'+e.message, 'err'); }
+}
+
+// ── 人格 ───────────────────────────────────────────
+async function loadPersonas(){
+  try{
+    const list = await api('/api/persona/list');
+    const sel = $('persona');
+    sel.innerHTML = list.map(p =>
+      `<option value="${p.path}">${p.name}${p.dir==='custom'?' （自定义）':''} · ${p.size} 字符</option>`
+    ).join('');
+    log(`加载了 ${list.length} 份人格`);
+  }catch(e){ log('加载失败：'+e.message, 'err'); }
+}
+async function applyPersona(){
+  const p = $('persona').value;
+  try{
+    const r = await api('/api/persona/apply','POST',{path:p});
+    log(`已应用人格（${r.size} 字符），代理 1 秒内热重载。新开会话才生效。`, 'ok');
+  }catch(e){ log('应用失败：'+e.message, 'err'); }
+}
+
+// 启动
+detect();
+refreshProxy();
+loadPersonas();
+setInterval(refreshProxy, 10000);
+</script>
+</body>
+</html>
