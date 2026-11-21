@@ -1,0 +1,31 @@
+{
+  "name": "fox-workbench",
+  "version": "0.1.0",
+  "description": "六席位 AI 客户端本地化工作台 — 检测 / 配置 / 注入 / 还原",
+  "type": "module",
+  "main": "src/main.js",
+  "bin": {
+    "fox": "cli.js"
+  },
+  "scripts": {
+    "detect": "node cli.js detect",
+    "seats": "node cli.js seats",
+    "test": "node cli.js detect",
+    "start": "electron .",
+    "pack:win": "electron-builder --win"
+  },
+  "keywords": [
+    "claude-desktop",
+    "dsh",
+    "workbuddy",
+    "codex",
+    "gemini",
+    "llm",
+    "workbench"
+  ],
+  "license": "MIT",
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}
