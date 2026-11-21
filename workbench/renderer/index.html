@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fox Workbench</title>
+<style>
+  :root{
+    --bg:#0d1014; --panel:#15191f; --panel2:#1c2129; --line:#272d37;
+    --fg:#e8ebf0; --dim:#7c8698; --acc:#ff6b35; --ok:#3fb950; --warn:#d29922; --err:#f85149; --info:#58a6ff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:14px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;padding:22px;max-width:1150px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+  h1{font-size:19px;font-weight:600;letter-spacing:.5px}
+  .sub{color:var(--dim);font-size:12px;margin-top:2px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;transition:.14s;font-family:inherit}
+  button:hover{background:#252b34;border-color:#39414f}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#140a05;font-weight:600}
+  button.primary:hover{background:#ff8357}
+  button.danger{color:var(--err);border-color:#48242a}
+  button.danger:hover{background:#241417}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  .pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;border:1px solid var(--line);color:var(--dim)}
+  .pill.ok{color:var(--ok);border-color:#1e4529;background:#0f1c14}
+  .pill.warn{color:var(--warn);border-color:#4a3a12;background:#1d170a}
+  .pill.err{color:var(--err);border-color:#4a2126;background:#1d0f11}
+  .pill.info{color:var(--info);border-color:#1d3a5c;background:#0d1722}
+
+  .seat{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
+  .seat.off{opacity:.45}
+  .seat-hd{display:flex;flex-direction:column;gap:10px;padding:14px 16px 10px}
+  .seat-nm{font-size:15px;font-weight:600}
+  .seat-vd{color:var(--dim);font-size:11.5px;margin-left:7px;font-weight:400}
+  .seat-meta{color:var(--dim);font-size:11.5px;margin-top:5px;font-family:ui-monospace,Consolas,monospace;word-break:break-all}
+  .seat-actions{display:flex;flex-wrap:wrap;gap:6px}
+  .seat-actions button{white-space:nowrap}
+  .seat-body{border-top:1px solid var(--line);padding:14px 16px;background:#10141a;display:none}
+  .seat-body.open{display:block}
+  .steps{font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.85;color:#a8b3c4;white-space:pre-wrap;margin-bottom:12px}
+  .steps .cmd{color:var(--info)}
+  .steps .dim{color:var(--dim)}
+  .foot{display:flex;gap:8px;padding-top:10px;border-top:1px dashed var(--line)}
+  .log{background:#080a0d;border:1px solid var(--line);border-radius:8px;padding:12px;font-family:ui-monospace,Consolas,monospace;font-size:11.5px;height:180px;overflow:auto;white-space:pre-wrap;color:var(--dim);margin-top:18px}
+  .log .l-ok{color:var(--ok)}
+  .log .l-err{color:var(--err)}
+  .log .l-warn{color:var(--warn)}
+  .sec{font-size:12px;color:var(--dim);margin:22px 0 10px;letter-spacing:1px}
+  select,input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:6px 9px;border-radius:6px;font-size:12.5px;font-family:inherit}
+  select:focus,input:focus{outline:none;border-color:var(--acc)}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Fox Workbench</h1>
+    <div class="sub">六席位 AI 客户端本地化 · 检测 / 配置 / 注入 / 还原</div>
+  </div>
+  <div class="bar">
+    <span id="proxyPill" class="pill">代理…</span>
+    <button onclick="refreshAll()">刷新</button>
+    <button class="primary" onclick="proxyStart()">启动代理</button>
+    <button class="danger" onclick="proxyStop()">停止</button>
+  </div>
+</header>
+
+<div class="bar" style="margin-bottom:16px">
+  <span class="pill info">人格</span>
+  <select id="personaSel" style="min-width:280px"></select>
+  <button onclick="loadPersonas()">刷新</button>
+</div>
+
+<div id="seats"></div>
+
+<div class="sec">日志</div>
+<div class="log" id="log"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; return n; };
+
+function log(msg, kind=''){
+  const t = new Date().toLocaleTimeString();
+  const line = el('div', kind ? 'l-'+kind : '');
+  line.textContent = `[${t}] ${msg}`;
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+async function api(path, method='GET', body){
+  const opt = { method };
+  if (body) { opt.headers = {'content-type':'application/json'}; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(()=>({error:'响应不是 JSON'}));
+  return j;
+}
+
+const TIER_LABEL = { full:'', partial:'部分', 'detect-only':'仅检测' };
+const ACTION_LABEL = { clean:'清理', key:'Key', armor:'破甲', custom:'定制' };
+
+let SEATS = [];
+let DETECT = new Map();
+
+function pill(txt, cls){ const s = el('span', 'pill' + (cls?' '+cls:'')); s.textContent = txt; return s; }
+
+async function refreshAll(){
+  await Promise.all([loadSeats(), loadPersonas(), refreshProxy()]);
+}
+
+async function loadSeats(){
+  const [seats, det] = await Promise.all([api('/api/seats'), api('/api/detect')]);
+  SEATS = seats;
+  DETECT = new Map(det.map(d => [d.id, d]));
+  render();
+}
+
+function render(){
+  const box = $('seats');
+  box.innerHTML = '';
+  for (const s of SEATS){
+    const d = DETECT.get(s.id) || { installed:false };
+    const card = el('div', 'seat' + (d.installed ? '' : ' off'));
+
+    const hd = el('div','seat-hd');
+    const left = el('div');
+    left.style.minWidth = '0';
+
+    const nm = el('div','seat-nm');
+    nm.textContent = s.name;
+    const vd = el('span','seat-vd'); vd.textContent = s.vendor;
+    nm.appendChild(vd);
+    left.appendChild(nm);
+
+    const pills = el('div');
+    pills.style.marginTop = '7px';
+    pills.appendChild(pill(d.installed ? '已安装' : '未安装', d.installed ? 'ok' : ''));
+    if (s.tier !== 'full') pills.appendChild(pill(TIER_LABEL[s.tier] || s.tier, 'warn'));
+    if (d.installed){
+      const st = d.state || {};
+      if (st.armored) pills.appendChild(pill('已破甲','ok'));
+      else if (st.configured) pills.appendChild(pill('已配置','warn'));
+      if (st.pluginInstalled) pills.appendChild(pill('插件已装','info'));
+      if (st.existingSkills) pills.appendChild(pill(st.existingSkills + ' 技能'));
+      if (st.hasPurge) pills.appendChild(pill('dsh-purge','info'));
+      if (st.emptyShell) pills.appendChild(pill('空壳目录','warn'));
+    }
+    for (const inj of (s.inject || [])) pills.appendChild(pill(inj));
+    left.appendChild(pills);
+
+    if (d.installed && d.path){
+      const meta = el('div','seat-meta');
+      meta.textContent = d.path + (d.version ? '  ·  v' + d.version : '') + (d.asar ? '  ·  asar ' + d.asar.sizeMB + 'MB' : '');
+      left.appendChild(meta);
+    }
+
+    const right = el('div','seat-actions');
+    if (d.installed && s.tier !== 'detect-only'){
+      for (const a of s.actions){
+        const b = el('button');
+        b.textContent = ACTION_LABEL[a] || a;
+        b.onclick = () => doPreview(s, a);
+        right.appendChild(b);
+      }
+    } else if (s.tier === 'detect-only'){
+      const b = el('button'); b.textContent = '查看原因'; b.onclick = () => doPreview(s, 'armor');
+      right.appendChild(b);
+    }
+
+    hd.appendChild(left); hd.appendChild(right);
+    card.appendChild(hd);
+
+    const body = el('div','seat-body');
+    body.id = 'body-' + s.id;
+    card.appendChild(body);
+
+    box.appendChild(card);
+  }
+}
+
+async function doPreview(seat, action){
+  const body = $('body-' + seat.id);
+  body.innerHTML = '';
+  const r = await api('/api/preview', 'POST', { seat: seat.id, action,
+    opts: { persona: $('personaSel').value, provider: 'deepseek' } });
+
+  if (!r.ok){ body.textContent = '预览失败：' + (r.error || '未知'); body.classList.add('open'); return; }
+
+  const pre = el('div','steps');
+  if (r.supported === false){
+    for (const line of r.steps) pre.appendChild(el('div')).textContent = line;
+    pre.appendChild(el('div','dim')).textContent = '不支持：' + (r.reason || '');
+  } else {
+    for (const line of (r.steps || [])) pre.appendChild(el('div')).textContent = '· ' + line;
+    if (r.note) pre.appendChild(el('div','dim')).textContent = '注：' + r.note;
+  }
+  body.appendChild(pre);
+
+  const foot = el('div','foot');
+  if (r.supported !== false && !r.manual){
+    const bApply = el('button'); bApply.className = 'primary'; bApply.textContent = '执行';
+    bApply.onclick = () => doApply(seat, action);
+    const bRestore = el('button'); bRestore.className = 'danger'; bRestore.textContent = '还原';
+    bRestore.onclick = () => doRestore(seat, action);
+    foot.appendChild(bApply); foot.appendChild(bRestore);
+  } else {
+    const hint = el('span','pill warn');
+    hint.textContent = r.manual ? '这项需手动配置' : '暂不支持';
+    foot.appendChild(hint);
+  }
+  body.appendChild(foot);
+  body.classList.add('open');
+}
+
+async function doApply(seat, action){
+  const opts = { persona: $('personaSel').value, provider: 'deepseek' };
+  if (action === 'key'){
+    const k = prompt('粘贴 API Key：');
+    if (!k) return;
+    opts.key = k.trim();
+    opts.provider = prompt('供应商（deepseek / glm / kimi / anthropic）:', 'deepseek') || 'deepseek';
+  }
+  const r = await api('/api/apply', 'POST', { seat: seat.id, action, opts });
+  if (!r.ok){ log(`${seat.name} · ${action} 失败：${r.error}`, 'err'); return; }
+  log(`${seat.name} · ${action} 已执行  ${JSON.stringify(Object.fromEntries(Object.entries(r).filter(([k])=>k!=='ok')))}`, 'ok');
+  if (r.needRestart) log(`→ 需重启 ${seat.name} 才生效`, 'warn');
+  loadSeats();
+}
+
+async function doRestore(seat, action){
+  if (!confirm(`还原 ${seat.name} 的 ${action}？`)) return;
+  const r = await api('/api/restore', 'POST', { seat: seat.id, action, opts:{} });
+  if (!r.ok){ log(`还原失败：${r.error}`, 'err'); return; }
+  log(`${seat.name} · ${action} 已还原`, 'ok');
+  if (r.needRestart) log(`→ 需重启 ${seat.name}`, 'warn');
+  loadSeats();
+}
+
+async function loadPersonas(){
+  const list = await api('/api/personas');
+  const sel = $('personaSel');
+  sel.innerHTML = '';
+  for (const p of list){
+    const o = el('option');
+    o.value = p.path;
+    o.textContent = `${p.name}${p.isDefault?'（当前）':''} · ${p.size} 字符`;
+    sel.appendChild(o);
+  }
+  if (list.length) log(`加载 ${list.length} 份人格 · 当前：${list[0].name}`);
+}
+
+async function refreshProxy(){
+  const s = await api('/api/proxy/status');
+  const p = $('proxyPill');
+  p.className = 'pill ' + (s.running ? 'ok' : 'err');
+  p.textContent = s.running ? `代理 :${s.port}` : '代理未运行';
+}
+
+async function proxyStart(){
+  const r = await api('/api/proxy/start', 'POST', { persona: $('personaSel').value });
+  if (r.ok) log(`代理已启动 :${r.port}${r.already?'（已在运行）':''}`, 'ok');
+  else log('启动失败：' + r.error, 'err');
+  refreshProxy();
+}
+async function proxyStop(){
+  const r = await api('/api/proxy/stop', 'POST', {});
+  log(r.ok ? '代理已停止' : '停止失败：' + r.error, r.ok?'ok':'err');
+  refreshProxy();
+}
+
+refreshAll();
+setInterval(refreshProxy, 8000);
+</script>
+</body>
+</html>

@@ -31,7 +31,14 @@ const CANDIDATES = [
 ];
 
 function detect() {
-  const found = CANDIDATES.filter((p) => exists(p));
+  // 空目录不算安装 —— 本机 %LOCALAPPDATA%\Doubao 就是个残留空壳
+  const found = CANDIDATES.filter((p) => {
+    if (!exists(p)) return false;
+    try {
+      const entries = fs.readdirSync(p);
+      return entries.length > 0;
+    } catch { return false; }
+  });
 
   // 尝试找主程序
   let exe = null;
@@ -52,6 +59,7 @@ function detect() {
     configPath: found[0] || null,
     state: {
       cacheDirs: found.length,
+      emptyShell: CANDIDATES.some((p) => exists(p)) && found.length === 0,
       userSkillsDir: hasUserSkills,
       mainExe: exe,
       armored: false,
